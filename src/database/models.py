@@ -7,11 +7,12 @@ from src.database.db import Base
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(150), index=True)
+    name: Mapped[str] = mapped_column(String(50), index=True)
+    pasword: Mapped[str] = mapped_column(String(255), nullable=False)
     surname: Mapped[str] = mapped_column(String(150), index=True)
     phone: Mapped[str] = mapped_column(String(16), unique=True, index=True)
     email: Mapped[str] = mapped_column(String(150), unique=True, index=True)
-
+    refresh_token: Mapped[str] = mapped_column(String(255), nullable=True)
 
 class Contact(Base):
     __tablename__ = "contacts"
