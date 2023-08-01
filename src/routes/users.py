@@ -6,7 +6,8 @@ from src.database.db import get_db
 from src.schemas import UserResponse, UserModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.repostory import users as repository_users
+from src.repository import users as repository_users
+from src.services.auth import oauth2_scheme, auth_service
 
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -14,7 +15,11 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("/", response_model=List[UserResponse])
 async def get_users(limit: int = Query(10, ge=10, le=500), offset: int = Query(0, ge=0, le=200),
-                    db: AsyncSession = Depends(get_db)):
+                    db: AsyncSession = Depends(get_db), token: str = Depends(oauth2_scheme)):
+    user = await auth_service.authorised_user(token, db)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
     users = await repository_users.get_users(limit, offset, db)
     return users
 

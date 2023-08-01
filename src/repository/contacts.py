@@ -3,12 +3,12 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 
-from src.database.models import Contact
+from src.database.models import Contact, User
 from src.schemas import ContactResponse
 
 
-async def get_contacts(limit: int, offset: int, db: AsyncSession):
-    sq = select(Contact).offset(offset).limit(limit)
+async def get_contacts(limit: int, offset: int, db: AsyncSession, user: User):
+    sq = select(Contact).filtered_by(user=user).offset(offset).limit(limit)
     contacts = await db.execute(sq)
     return contacts.scalars().all()
 

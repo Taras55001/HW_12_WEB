@@ -2,7 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.database.models import User
-from src.schemas import UserResponse
+from src.schemas import UserResponse, UserModel
 
 
 async def get_users(limit: int, offset: int, db: AsyncSession):
@@ -17,12 +17,20 @@ async def get_user(user_id: int, db: AsyncSession):
     return users.scalar_one_or_none()
 
 
-async def create_user(body: UserResponse, db: AsyncSession):
-    user = User(name=body.name, surname=body.surname, phone=body.phone, email=body.email)
+async def get_user_by_email(email: str, db: AsyncSession):
+    sq = select(User).filter_by(email=email)
+    result = await db.execute(sq)
+    user = result.scalar_one_or_none()
+    return user
+
+
+async def create_user(body: UserModel, db: AsyncSession):
+    user = User(**body.model_dump())
     db.add(user)
     await db.commit()
     await db.refresh(user)
     return user
+
 
 async def update_user(user_id: int, body: UserResponse, db: AsyncSession):
     sq = select(User).filter_by(id=user_id)
