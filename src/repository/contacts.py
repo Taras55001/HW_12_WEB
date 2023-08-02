@@ -1,27 +1,26 @@
 from datetime import datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
-
+from sqlalchemy import select, or_
 from src.database.models import Contact, User
 from src.schemas import ContactResponse
 
 
 async def get_contacts(limit: int, offset: int, db: AsyncSession, user: User):
-    sq = select(Contact).filtered_by(user=user).offset(offset).limit(limit)
+    sq = select(Contact).filter_by(user=user).offset(offset).limit(limit)
     contacts = await db.execute(sq)
     return contacts.scalars().all()
 
 
-async def get_contact(contact_id: int, db: AsyncSession):
-    sq = select(Contact).filter_by(id=contact_id)
+async def get_contact(contact_id: int, db: AsyncSession, user: User):
+    sq = select(Contact).filter_by(id=contact_id, user=user)
     contact = await db.execute(sq)
     return contact.scalar_one_or_none()
 
 
-async def create_contact(body: ContactResponse, db: AsyncSession):
+async def create_contact(body: ContactResponse, db: AsyncSession, user: User):
     contact = Contact(name=body.name, surname=body.surname, birthday=body.birthday, phone=body.phone, email=body.email,
-                      user_id=body.user_id)
+                      user=user)
     if body.description:
         contact.description = body.description
     db.add(contact)
@@ -30,8 +29,8 @@ async def create_contact(body: ContactResponse, db: AsyncSession):
     return contact
 
 
-async def update_contact(contact_id: int, body: ContactResponse, db: AsyncSession):
-    sq = select(Contact).filter_by(id=contact_id)
+async def update_contact(contact_id: int, body: ContactResponse, db: AsyncSession, user: User):
+    sq = select(Contact).filter_by(id=contact_id, user=user)
     result = await db.execute(sq)
     contact = result.scalar_one_or_none()
     if contact:
@@ -39,15 +38,15 @@ async def update_contact(contact_id: int, body: ContactResponse, db: AsyncSessio
         contact.surname = body.surname
         contact.phone = body.phone
         contact.email = body.email
-        contact.user_id = body.user_id
+        contact.user = user
         contact.description = body.description
         await db.commit()
         await db.refresh(contact)
     return contact
 
 
-async def remove_contact(contact_id: int, db: AsyncSession):
-    sq = select(Contact).filter_by(id=contact_id)
+async def remove_contact(contact_id: int, db: AsyncSession, user: User):
+    sq = select(Contact).filter_by(id=contact_id, user=user)
     result = await db.execute(sq)
     contact = result.scalar_one_or_none()
     if contact:
@@ -56,29 +55,28 @@ async def remove_contact(contact_id: int, db: AsyncSession):
     return contact
 
 
-async def search_contact(user_id: int,
+async def search_contact(user: User,
+                         db: AsyncSession,
                          contact_name: str,
                          surname: str,
-                         email: str,
-                         db: AsyncSession):
-    sq = select(Contact).filter_by(user_id=user_id)
-    result = await db.execute(sq)
-    query = result.scalars().all()
-    con_list = []
+                         email: str):
+    sq = select(Contact).filter_by(user=user)
     if contact_name:
-        con_list.append(contact for contact in query if contact_name.strip().lower() in contact.name.lower())
+        sq = sq.filter(or_(Contact.name.ilike(f'%{contact_name}%')))
     elif surname:
-        con_list.append(contact for contact in query if surname.strip().lower() in contact.surname.lower())
+        sq = sq.filter(or_(Contact.surname.ilike(f'%{surname}%')))
     elif email:
-        con_list.append(contact for contact in query if email.strip().lower() in contact.email.lower())
+        sq = sq.filter(or_(Contact.email.ilike(f'%{email}%')))
 
-    return con_list[0] if len(con_list) else None
+    result = await db.execute(sq)
+    contact_found = result.scalars().first()
+    return contact_found
 
 
-async def upcoming_birthdays(user_id, db):
+async def upcoming_birthdays(user: User, db):
     current_date = datetime.now().date()
     future_birthday = current_date + timedelta(days=7)
-    sq = select(Contact).filter(Contact.user_id == user_id)
+    sq = select(Contact).filter_by(user=user)
     result = await db.execute(sq)
     list_bd_contacts = result.scalars().all()
     happy_contacts = []

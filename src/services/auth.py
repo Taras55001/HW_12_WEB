@@ -1,15 +1,18 @@
 import os
 from typing import Dict, Any, Optional
 
+from fastapi import HTTPException, status, Depends
 from dotenv import load_dotenv
 from jose import JWTError, jwt
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.database.db import get_db
 from src.repository import users as repository_users
 
-
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 class PasswordManager:
     def __init__(self):
@@ -27,21 +30,26 @@ class JWTManager:
         self.secret_key = secret_key
         self.algorithm = algorithm
 
-    def create_token(self, data: Dict[str, Any], expires_delta: Optional[float] = None):
+    def create_token(self, data: Dict[str, Any], scope: str, expires_delta: Optional[float] = None):
         to_encode = data.copy()
         if expires_delta:
             expire = datetime.utcnow() + timedelta(seconds=expires_delta)
         else:
             expire = datetime.utcnow() + timedelta(minutes=15)
-        to_encode.update({"iat": datetime.utcnow(), "exp": expire})
+        to_encode.update({"iat": datetime.utcnow(), "exp": expire, "scope": scope})
         encoded_token = jwt.encode(to_encode, self.secret_key, algorithm=self.algorithm)
         return encoded_token
 
-    def decode_token(self, token: str):
+    def decode_token(self, token: str = Depends(oauth2_scheme)):
         try:
-            return jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            if payload['scope'] == 'refresh_token':
+                email = payload['sub']
+                return email
+            else:
+                raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Invalid scope for token')
         except JWTError:
-            return None
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail='Could not validate credentials')
 
 
 class AuthService:
@@ -52,19 +60,13 @@ class AuthService:
 
     async def authenticate_user(self, email: str, password: str, db: AsyncSession):
         user = await self.user_repository.get_user_by_email(email, db)
-        if user is None or not self.password_manager.verify_password(password, user.pasword):
+        if user is None or not self.password_manager.verify_password(password, user.password):
             return None
         return user
 
-    async def authorised_user(self, token: str, db: AsyncSession):
+    async def authorised_user(self, token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
         try:
-            peyload = self.jwt_manager.decode_token(token)
-            if peyload["scope"] == "access_token":
-                email = peyload["sub"]
-                if email is None:
-                    return None
-            else:
-                return None
+            email = self.jwt_manager.decode_token(token)
         except JWTError:
             return None
         user = await self.user_repository.get_user_by_email(email, db)
@@ -75,18 +77,17 @@ class AuthService:
     async def create_access_token(self, user):
         access_token_expires = 900
         access_token_data = {"sub": user.email}
-        return self.jwt_manager.create_token(access_token_data, access_token_expires)
+        return self.jwt_manager.create_token(access_token_data, "access_token", access_token_expires)
 
     async def create_refresh_token(self, user):
         refresh_token_expires = 604800
         refresh_token_data = {"sub": user.email}
-        return self.jwt_manager.create_token(refresh_token_data, refresh_token_expires)
+        token = self.jwt_manager.create_token(refresh_token_data, "refresh_token", refresh_token_expires)
+        return token
 
 
 load_dotenv()
 secret_key = os.getenv("PASSWORD")
 algorithm = "HS256"
 
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 auth_service = AuthService(PasswordManager(), JWTManager(secret_key, algorithm), repository_users)
